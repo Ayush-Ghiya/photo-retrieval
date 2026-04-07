@@ -28,6 +28,8 @@ import torch.nn.functional as F
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
+from utils import load_clip_model
+
 # ---------------------------------------------------------------------------
 # CLIP import — supports both openai/CLIP (pip install git+...) and
 # the newer open_clip (pip install open-clip-torch).
@@ -56,21 +58,6 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-
-
-def load_clip_model(model_name: str, device: torch.device):
-    """Load CLIP model and preprocessing transform."""
-    if CLIP_BACKEND == "openai":
-        model, preprocess = clip.load(model_name, device=device)
-        print(f"✓ Loaded openai/CLIP  model='{model_name}'  device={device}")
-    else:
-        model, _, preprocess = open_clip.create_model_and_transforms(
-            model_name, pretrained="openai"
-        )
-        model = model.to(device)
-        print(f"✓ Loaded open_clip  model='{model_name}'  device={device}")
-    model.eval()
-    return model, preprocess
 
 
 def encode_text(prompt: str, model, device: torch.device) -> torch.Tensor:
@@ -275,7 +262,7 @@ def main():
     print("=" * 55 + "\n")
 
     # 1. Load model
-    model, preprocess = load_clip_model(args.model, device)
+    model, preprocess = load_clip_model(args.model, device,CLIP_BACKEND)
 
     # 2. Encode text prompt
     print(f"\nEncoding prompt: \"{args.prompt}\"")
