@@ -10,8 +10,8 @@ ChromaDB handles nearest-neighbour search entirely on disk via HNSW.
 Usage
 -----
   python clip_image_search.py --prompt "a red car on the road"
-  python clip_image_search.py --prompt "small bird" --top_k 10 --split test
-  python clip_image_search.py --prompt "dog" --class_filter dog --top_k 5
+  python clip_image_search.py --prompt "small bird" --top_k 10
+  python clip_image_search.py --prompt "dog"
   python clip_image_search.py --prompt "animal" --save_images --output ./results
 """
 
@@ -24,10 +24,8 @@ import torch
 import torch.nn.functional as F
 from PIL import Image, ImageDraw, ImageFont
 
-try:
-    import chromadb
-except ImportError:
-    sys.exit("ChromaDB client not found.\nInstall it with:  pip install chromadb-client")
+from utils import get_chroma_db_client, load_clip_model,COLLECTION_NAME
+
 
 try:
     import clip
@@ -44,7 +42,7 @@ except ImportError:
             "  pip install open-clip-torch"
         )
 
-COLLECTION_NAME = "cifar_clip"
+
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +50,7 @@ COLLECTION_NAME = "cifar_clip"
 # ---------------------------------------------------------------------------
 
 def connect_collection(db_dir: str):
-    client =  chromadb.HttpClient(host='localhost', port=8000)
+    client = get_chroma_db_client()
     try:
         collection = client.get_collection(COLLECTION_NAME)
     except Exception:
@@ -67,18 +65,6 @@ def connect_collection(db_dir: str):
     return collection, model
 
 
-def load_clip_model(model_name: str, device: torch.device):
-    if CLIP_BACKEND == "openai":
-        model, _ = clip.load(model_name, device=device)
-        print(f"Loaded openai/CLIP  model='{model_name}'  device={device}")
-    else:
-        model, _, _ = open_clip.create_model_and_transforms(
-            model_name, pretrained="openai"
-        )
-        model = model.to(device)
-        print(f"Loaded open_clip  model='{model_name}'  device={device}")
-    model.eval()
-    return model
 
 
 def encode_text(prompt: str, model, device: torch.device) -> list[float]:
@@ -99,28 +85,17 @@ def search(
     collection,
     query_embedding: list[float],
     top_k: int,
-    split_filter: str | None,
-    class_filter: str | None,
 ) -> tuple[list[dict], list[float]]:
     """
-    Query ChromaDB.  Supports optional metadata filters so you can restrict
-    results to a specific split ('train'/'test') or class name.
+    Query ChromaDB.  Supports optional metadata filters
     """
-    where = {}
-    if split_filter and class_filter:
-        where = {"$and": [{"split": split_filter}, {"class_name": class_filter}]}
-    elif split_filter:
-        where = {"split": split_filter}
-    elif class_filter:
-        where = {"class_name": class_filter}
-
+    
     kwargs = dict(
         query_embeddings=[query_embedding],
         n_results=top_k,
         include=["metadatas", "distances"],
     )
-    if where:
-        kwargs["where"] = where
+
 
     results = collection.query(**kwargs)
 
@@ -182,7 +157,7 @@ def make_contact_sheet(
 
         sheet.paste(thumb, (x, y))
 
-        label = f"{rec['class_name']}  {sim:.3f}"
+        label = f"{sim:.3f}"
         draw.rectangle(
             [x, y + thumb_size, x + thumb_size, y + thumb_size + label_h],
             fill=(20, 20, 20),
@@ -206,11 +181,6 @@ def main():
                         help='Text query, e.g. "a red car on the road"')
     parser.add_argument("--db_dir",       type=str, default="./chroma_db",
                         help="ChromaDB directory built by build_index.py (default: ./chroma_db)")
-    parser.add_argument("--split",        type=str, default=None,
-                        choices=["train", "test"],
-                        help="Restrict search to one split (default: search both)")
-    parser.add_argument("--class_filter", type=str, default=None,
-                        help="Restrict search to one class, e.g. 'dog' or 'airplane'")
     parser.add_argument("--top_k",        type=int, default=20,
                         help="Number of results to return (default: 20)")
     parser.add_argument("--output",       type=str, default="./clip_results",
@@ -230,8 +200,6 @@ def main():
     print("=" * 55)
     print(f"  Prompt       : {args.prompt}")
     print(f"  DB dir       : {args.db_dir}")
-    print(f"  Split filter : {args.split or 'all'}")
-    print(f"  Class filter : {args.class_filter or 'all'}")
     print(f"  Top-k        : {args.top_k}")
     print(f"  Device       : {device}")
     print("=" * 55 + "\n")
@@ -240,7 +208,7 @@ def main():
     collection, model_name = connect_collection(args.db_dir)
 
     # 2. Load CLIP (text encoder only — no image encoding needed)
-    model = load_clip_model(model_name, device)
+    model,preprocess = load_clip_model(model_name, device, CLIP_BACKEND)
 
     # 3. Encode text prompt -> single vector
     print(f'\nEncoding prompt: "{args.prompt}"')
@@ -251,26 +219,22 @@ def main():
     metadatas, scores = search(
         collection,
         query_embedding,
-        args.top_k,
-        split_filter=args.split,
-        class_filter=args.class_filter,
+        args.top_k
     )
 
     # 5. Print results
     print(f"\nTop-{len(metadatas)} results for: \"{args.prompt}\"\n")
-    print(f"  {'Rank':<5}  {'Score':>6}  {'Split':<6}  {'Class':<15}  {'File'}")
+    print(f"  {'Rank':<5}  {'Score':>6}  {'File'}")
     print(f"  {'-'*4}  {'-'*6}  {'-'*5}  {'-'*14}  {'-'*30}")
     for rank, (rec, score) in enumerate(zip(metadatas, scores), 1):
         print(
-            f"  {rank:<5}  {score:>6.4f}  {rec['split']:<6}  "
-            f"{rec['class_name']:<15}  {rec['filename']}"
+            f"  {rank:<5}  {score:>6.4f}  "
+            f"  {rec['filename']}"
         )
 
     # 6. Contact sheet
     output_dir  = Path(args.output)
-    split_label = args.split or "all"
-    cls_label   = f"_{args.class_filter}" if args.class_filter else ""
-    sheet_path  = output_dir / f"results_{split_label}{cls_label}.png"
+    sheet_path  = output_dir / f"results_{args.top_k}.png"
     make_contact_sheet(
         metadatas, scores, args.prompt, sheet_path,
         thumb_size=args.thumb_size, cols=args.cols,
@@ -281,7 +245,7 @@ def main():
         indiv_dir = output_dir / "top_images"
         indiv_dir.mkdir(parents=True, exist_ok=True)
         for rank, (rec, score) in enumerate(zip(metadatas, scores), 1):
-            dest = indiv_dir / f"{rank:02d}_{score:.4f}_{rec['class_name']}_{rec['filename']}"
+            dest = indiv_dir / f"{rank:02d}_{score:.4f}_{rec['filename']}"
             Image.open(rec["path"]).convert("RGB").save(dest)
         print(f"Individual images saved -> {indiv_dir}")
 

@@ -1,4 +1,8 @@
 """
+PHASE 1: CLIP Image Search
+===========================
+This script performs a CLIP-based image search over a directory of CIFAR images by encoding a text prompt and all images, then computing cosine similarity to find the best matches. This script does not use a vector database; it operates directly on the image files and their CLIP embeddings in memory.
+
 CLIP Image Search over CIFAR Dataset
 --------------------------------------
 Given a text prompt from the CLI, this script uses OpenAI's CLIP model to

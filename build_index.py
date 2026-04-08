@@ -26,12 +26,9 @@ import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
 
-from utils import load_clip_model
+from utils import load_clip_model,COLLECTION_NAME,SUPPORTED_EXTS,get_chroma_db_client
 
-try:
-    import chromadb
-except ImportError:
-   sys.exit("ChromaDB client not found.\nInstall it with:  pip install chromadb-client")
+
 
 try:
     import clip
@@ -48,25 +45,23 @@ except ImportError:
             "  pip install open-clip-torch"
         )
 
-SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-COLLECTION_NAME = "cifar_clip"
 
 
 
-def collect_image_paths(dataset_dir: Path, splits: list[str]) -> list[Path]:
-    paths = []
-    for split in splits:
-        split_dir = dataset_dir / split
-        if not split_dir.exists():
-            print(f"  Warning: split directory not found, skipping: {split_dir}")
-            continue
-        found = sorted(
-            p for p in split_dir.rglob("*") if p.suffix.lower() in SUPPORTED_EXTS
-        )
-        print(f"  {split:>5} split -> {len(found):>7,} images")
-        paths.extend(found)
+
+def collect_image_paths(dataset_dir: Path) -> list[Path]:
+    if not dataset_dir.exists():
+        sys.exit(f"Directory not found: {dataset_dir}")
+
+    # Update glob to rglob to get recursive search
+    paths = sorted(
+        p for p in dataset_dir.glob("*") if p.suffix.lower() in SUPPORTED_EXTS
+    )
+
     if not paths:
-        sys.exit(f"No images found under '{dataset_dir}'. Run cifar_to_images.py first.")
+        sys.exit(f"No images found under '{dataset_dir}'. Run build_dataset.py first.")
+
+    print(f"  {dataset_dir.name} -> {len(paths):>7,} images")
     return paths
 
 
@@ -98,13 +93,10 @@ def encode_batch(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Build a ChromaDB vector index from a CIFAR image folder."
+        description="Build a ChromaDB vector index from a given dataset image folder."
     )
     parser.add_argument("--dataset_dir", type=str, default="./cifar_images",
-                        help="Root image directory from cifar_to_images.py (default: ./cifar_images)")
-    parser.add_argument("--splits", nargs="+", default=["train", "test"],
-                        choices=["train", "test"],
-                        help="Which splits to index (default: train test)")
+                        help="Root image directory from build_dataset.py (default: ./cifar_images)")
     parser.add_argument("--model", type=str, default="ViT-B/32",
                         help="CLIP model variant (default: ViT-B/32)")
     parser.add_argument("--batch_size", type=int, default=128,
@@ -119,7 +111,6 @@ def main():
     print("  CLIP Index Builder  ->  ChromaDB")
     print("=" * 55)
     print(f"  Dataset dir  : {args.dataset_dir}")
-    print(f"  Splits       : {args.splits}")
     print(f"  Model        : {args.model}")
     print(f"  Batch size   : {args.batch_size}")
     print(f"  Device       : {device}")
@@ -129,8 +120,8 @@ def main():
     dataset_dir = Path(args.dataset_dir)
 
     # 1. Connect to ChromaDB
-    print(f"Connecting to ChromaDB at 'http://localhost:8000' ...")
-    client =  chromadb.HttpClient(host='localhost', port=8000)
+    print(f"Connecting to ChromaDB client ...")
+    client =  get_chroma_db_client()
 
     if args.rebuild:
         try:
@@ -152,7 +143,7 @@ def main():
 
     # 2. Collect paths
     print(f"\nScanning '{dataset_dir}' ...")
-    all_paths = collect_image_paths(dataset_dir, args.splits)
+    all_paths = collect_image_paths(dataset_dir)
     print(f"  Total found  : {len(all_paths):,} images")
 
     # 3. Skip already-indexed images (incremental)
@@ -178,23 +169,18 @@ def main():
         embeddings = encode_batch(batch_paths, model, preprocess, device)
 
         ids       = [path_to_id(p) for p in batch_paths]
+        # Review this metadata extraction logic to ensure it correctly captures the intended structure
+        # The current logic assumes a directory structure where the first level is the split (e.g., "train", "test") and the second level is the class name. If the structure is different, this may need to be adjusted.
+        # For example, if the images are directly under the dataset_dir without subdirectories, the split will be "unknown" and the class_name will be derived from the parent directory of the image. If there are more nested directories, the logic may need to be updated to correctly identify the split and class name.
         metadatas = []
         for p in batch_paths:
-            try:
-                rel        = p.relative_to(dataset_dir)
-                parts      = rel.parts
-                split      = parts[0] if len(parts) >= 3 else "unknown"
-                class_name = parts[1] if len(parts) >= 3 else p.parent.name
-            except ValueError:
-                split      = "unknown"
-                class_name = p.parent.name
-
             metadatas.append({
                 "path":       str(p),
-                "class_name": class_name,
-                "split":      split,
                 "filename":   p.name,
             })
+
+
+            
 
         collection.upsert(
             ids=ids,
