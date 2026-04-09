@@ -1,6 +1,6 @@
 # To run this app, use the command: `flask run`
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 from search import search_images
 
@@ -20,3 +20,12 @@ def get_images():
     image_list, results, scores = search_images(prompt=query)  # your function
     
     return jsonify({"images": image_list})
+
+#TEMPORARY Serve images from the cifar_images directory
+@app.route('/images/<filename>', methods=['GET'])
+def serve_image(filename):
+    image_path = f"./cifar_images/{filename}"
+    return send_file(image_path)
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
