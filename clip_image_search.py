@@ -24,89 +24,15 @@ import torch
 import torch.nn.functional as F
 from PIL import Image, ImageDraw, ImageFont
 
+from search import search_images
 from utils import get_chroma_db_client, load_clip_model,COLLECTION_NAME
 
 
-try:
-    import clip
-    CLIP_BACKEND = "openai"
-except ImportError:
-    try:
-        import open_clip
-        CLIP_BACKEND = "open_clip"
-    except ImportError:
-        sys.exit(
-            "No CLIP library found.\n"
-            "Install one of:\n"
-            "  pip install git+https://github.com/openai/CLIP.git\n"
-            "  pip install open-clip-torch"
-        )
 
 
 
 
-# ---------------------------------------------------------------------------
-# DB + CLIP
-# ---------------------------------------------------------------------------
 
-def connect_collection(db_dir: str):
-    client = get_chroma_db_client()
-    try:
-        collection = client.get_collection(COLLECTION_NAME)
-    except Exception:
-        sys.exit(
-            f"Collection '{COLLECTION_NAME}' not found in '{db_dir}'.\n"
-            f"Run build_index.py first:\n"
-            f"  python build_index.py --dataset_dir ./cifar_images"
-        )
-    meta  = collection.metadata or {}
-    model = meta.get("model", "ViT-B/32")
-    print(f"Connected to ChromaDB  —  {collection.count():,} vectors  |  model='{model}'")
-    return collection, model
-
-
-
-
-def encode_text(prompt: str, model, device: torch.device) -> list[float]:
-    if CLIP_BACKEND == "openai":
-        tokens = clip.tokenize([prompt]).to(device)
-    else:
-        tokens = open_clip.tokenize([prompt]).to(device)
-    with torch.no_grad():
-        feat = model.encode_text(tokens)
-    return F.normalize(feat, dim=-1).cpu().squeeze(0).tolist()
-
-
-# ---------------------------------------------------------------------------
-# Search
-# ---------------------------------------------------------------------------
-
-def search(
-    collection,
-    query_embedding: list[float],
-    top_k: int,
-) -> tuple[list[dict], list[float]]:
-    """
-    Query ChromaDB.  Supports optional metadata filters
-    """
-    
-    kwargs = dict(
-        query_embeddings=[query_embedding],
-        n_results=top_k,
-        include=["metadatas", "distances"],
-    )
-
-
-    results = collection.query(**kwargs)
-
-    metadatas = results["metadatas"][0]   # list of dicts
-    distances = results["distances"][0]   # cosine distance: 0 = identical, 2 = opposite
-
-    # Convert cosine distance -> similarity score in [0, 1]
-    # similarity = 1 - (distance / 2)
-    scores = [1.0 - (d / 2.0) for d in distances]
-
-    return metadatas, scores
 
 
 # ---------------------------------------------------------------------------
@@ -193,50 +119,18 @@ def main():
                         help="Columns in the contact sheet (default: 5)")
 
     args   = parser.parse_args()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    print("\n" + "=" * 55)
-    print("  CLIP Image Search  (ChromaDB)")
-    print("=" * 55)
-    print(f"  Prompt       : {args.prompt}")
-    print(f"  DB dir       : {args.db_dir}")
-    print(f"  Top-k        : {args.top_k}")
-    print(f"  Device       : {device}")
-    print("=" * 55 + "\n")
-
-    # 1. Connect to DB and get model name that was used to build the index
-    collection, model_name = connect_collection(args.db_dir)
-
-    # 2. Load CLIP (text encoder only — no image encoding needed)
-    model,preprocess = load_clip_model(model_name, device, CLIP_BACKEND)
-
-    # 3. Encode text prompt -> single vector
-    print(f'\nEncoding prompt: "{args.prompt}"')
-    query_embedding = encode_text(args.prompt, model, device)
-
-    # 4. Search ChromaDB
-    print("Searching ChromaDB ...")
-    metadatas, scores = search(
-        collection,
-        query_embedding,
-        args.top_k
+   
+    image_list,results,scores = search_images(
+        prompt=args.prompt,
+        top_k=args.top_k,
+        db_dir=args.db_dir,
     )
-
-    # 5. Print results
-    print(f"\nTop-{len(metadatas)} results for: \"{args.prompt}\"\n")
-    print(f"  {'Rank':<5}  {'Score':>6}  {'File'}")
-    print(f"  {'-'*4}  {'-'*6}  {'-'*5}  {'-'*14}  {'-'*30}")
-    for rank, (rec, score) in enumerate(zip(metadatas, scores), 1):
-        print(
-            f"  {rank:<5}  {score:>6.4f}  "
-            f"  {rec['filename']}"
-        )
 
     # 6. Contact sheet
     output_dir  = Path(args.output)
     sheet_path  = output_dir / f"results_{args.top_k}.png"
     make_contact_sheet(
-        metadatas, scores, args.prompt, sheet_path,
+        results, scores, args.prompt, sheet_path,
         thumb_size=args.thumb_size, cols=args.cols,
     )
 
@@ -244,7 +138,7 @@ def main():
     if args.save_images:
         indiv_dir = output_dir / "top_images"
         indiv_dir.mkdir(parents=True, exist_ok=True)
-        for rank, (rec, score) in enumerate(zip(metadatas, scores), 1):
+        for rank, (rec, score) in enumerate(zip(results, scores), 1):
             dest = indiv_dir / f"{rank:02d}_{score:.4f}_{rec['filename']}"
             Image.open(rec["path"]).convert("RGB").save(dest)
         print(f"Individual images saved -> {indiv_dir}")
