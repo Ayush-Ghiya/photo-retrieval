@@ -1,2 +1,5 @@
 data/
 cifar_images/
+clip_results/
+__pycache__/
+.env
