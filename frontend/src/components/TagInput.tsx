@@ -68,7 +68,11 @@ export function TagInput({ label, value, onChange, suggestions = [], placeholder
           }}
           onKeyDown={onKeyDown}
           onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onBlur={() => {
+            setFocused(false);
+            // Typed-but-unconfirmed text counts: commit it so Save/Upload never drops it silently.
+            if (text.trim()) add(text);
+          }}
         />
       </div>
       {error && (

@@ -34,3 +34,22 @@ def test_seed_demo_is_idempotent(services):
     assert second["duplicate"] == 2
     items, total = services.images.list_images(page=1, page_size=10, tags=["frog"], source="demo", sort="taken")
     assert total == 1 and items[0].filename == "cifar10-00002.png"
+
+
+def test_interrupted_reindex_all_leaves_rest_unindexed(services, monkeypatch):
+    import pytest
+
+    ids = [services.images.upload(f"{i}.png", png_bytes(color=(i, 5, 5)), tags=[]).id for i in range(3)]
+    real = services.images.index_image
+    calls = {"n": 0}
+
+    def flaky(image_id, rgb=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real(image_id, rgb)
+
+    monkeypatch.setattr(services.images, "index_image", flaky)
+    with pytest.raises(KeyboardInterrupt):
+        cmd_reindex(services, all_images=True)
+    assert sorted(services.images.unindexed_ids(), key=str) == sorted(ids[1:], key=str)

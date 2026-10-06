@@ -46,4 +46,11 @@ describe("TagInput", () => {
     await userEvent.click(options[0]);
     expect(screen.getByTestId("value")).toHaveTextContent("goal|goa");
   });
+
+  it("commits typed text when the input loses focus", async () => {
+    render(<Harness />);
+    await userEvent.type(screen.getByLabelText("Tags"), "Goa Trip");
+    await userEvent.tab();
+    expect(screen.getByTestId("value")).toHaveTextContent("goa-trip");
+  });
 });

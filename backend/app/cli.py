@@ -19,7 +19,11 @@ from app.tags import normalize_tag
 
 
 def cmd_reindex(services: Services, *, all_images: bool) -> int:
-    ids = services.images.unindexed_ids(include_all=all_images)
+    if all_images:
+        # Flag everything first so an interrupted run is resumed by a plain `reindex`.
+        services.images.mark_all_unindexed()
+        services.index.recreate()
+    ids = services.images.unindexed_ids()
     print(f"Reindexing {len(ids)} image(s) ...")
     failed = 0
     for n, image_id in enumerate(ids, 1):

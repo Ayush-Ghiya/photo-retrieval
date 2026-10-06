@@ -15,6 +15,7 @@ except ImportError:  # HEIC support is optional
 # Pillow format name -> (mime type, file extension)
 ALLOWED_FORMATS = {
     "JPEG": ("image/jpeg", "jpg"),
+    "MPO": ("image/jpeg", "jpg"),  # multi-picture JPEGs (Ultra HDR / gain-map phone photos)
     "PNG": ("image/png", "png"),
     "WEBP": ("image/webp", "webp"),
     "HEIF": ("image/heic", "heic"),
@@ -48,6 +49,8 @@ def _open(data: bytes) -> Image.Image:
     try:
         img = Image.open(io.BytesIO(data))
         img.load()
+    except Image.DecompressionBombError as e:
+        raise UnsupportedImage("Image is too large (pixel count exceeds the safety limit)") from e
     except (UnidentifiedImageError, OSError, SyntaxError) as e:
         raise UnsupportedImage("File is not a readable image") from e
     return img

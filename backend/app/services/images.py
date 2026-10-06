@@ -4,7 +4,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from PIL import Image as PILImage
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -73,6 +73,9 @@ class ImageService:
             processed = process_image(data)
         except UnsupportedImage as e:
             return UploadResult(filename, "error", message=str(e))
+        except Exception:
+            logger.exception("Could not decode %s", filename)
+            return UploadResult(filename, "error", message="Could not read image")
 
         with self.sessions() as s:
             existing = s.scalar(select(Image.id).where(Image.content_hash == processed.content_hash))
@@ -132,6 +135,10 @@ class ImageService:
             s.execute(sa_update(Image).where(Image.id == image_id).values(indexed=indexed))
         return warning
 
+    def mark_all_unindexed(self) -> None:
+        with self.sessions.begin() as s:
+            s.execute(sa_update(Image).values(indexed=False))
+
     def unindexed_ids(self, include_all: bool = False) -> list[UUID]:
         stmt = select(Image.id).order_by(Image.created_at)
         if not include_all:
@@ -165,18 +172,29 @@ class ImageService:
     def find_by_metadata(
         self, terms: list[str], *, tags: list[str], source: str | None, limit: int
     ) -> list[Image]:
-        """Images whose title, description or tags contain any of the (alphanumeric) terms."""
+        """Images with a word in title/description/tags starting with any term, most terms matched first.
+
+        Terms are alphanumeric (see text_match.query_terms), so they are safe inside a regex.
+        """
         if not terms:
             return []
-        conditions = []
+        per_term = []
         for term in terms:
-            pattern = f"%{term}%"
-            conditions += [
-                Image.title.ilike(pattern),
-                Image.description.ilike(pattern),
-                Image.tags.any(Tag.name.ilike(pattern)),
-            ]
-        stmt = self._filtered(select(Image), tags, source).where(or_(*conditions)).limit(limit)
+            pattern = rf"\m{term}"  # Postgres word-start boundary: "art" matches "street-art", not "party"
+            per_term.append(
+                or_(
+                    Image.title.regexp_match(pattern, flags="i"),
+                    Image.description.regexp_match(pattern, flags="i"),
+                    Image.tags.any(Tag.name.regexp_match(pattern, flags="i")),
+                )
+            )
+        matched = sum(case((cond, 1), else_=0) for cond in per_term)
+        stmt = (
+            self._filtered(select(Image), tags, source)
+            .where(or_(*per_term))
+            .order_by(matched.desc(), Image.created_at.desc())
+            .limit(limit)
+        )
         with self.sessions() as s:
             return list(s.scalars(stmt))
 

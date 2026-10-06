@@ -66,3 +66,17 @@ def test_truncated_jpeg_rejected():
 def test_open_rgb_applies_orientation():
     img = open_rgb(jpeg_with_exif(size=(200, 100), orientation=6))
     assert img.size == (100, 200) and img.mode == "RGB"
+
+
+def test_decompression_bomb_rejected(monkeypatch):
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)  # 64x64 = 4096 > 2x limit -> bomb error
+    with pytest.raises(UnsupportedImage, match="too large"):
+        process_image(png_bytes(size=(64, 64)))
+
+
+def test_mpo_phone_jpeg_accepted():
+    buf = io.BytesIO()
+    first, second = Image.new("RGB", (40, 20), (200, 0, 0)), Image.new("RGB", (40, 20), (0, 0, 200))
+    first.save(buf, format="MPO", save_all=True, append_images=[second])
+    p = process_image(buf.getvalue())
+    assert (p.mime_type, p.ext, p.width, p.height) == ("image/jpeg", "jpg", 40, 20)

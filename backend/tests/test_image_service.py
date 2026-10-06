@@ -137,3 +137,28 @@ def test_tag_counts(image_service):
     image_service.upload("a.png", png_bytes(color=(1, 1, 1)), tags=["goa", "beach"])
     image_service.upload("b.png", png_bytes(color=(2, 2, 2)), tags=["goa"])
     assert image_service.tag_counts() == [("goa", 2), ("beach", 1)]
+
+
+def test_unexpected_decode_error_is_a_per_file_error(image_service, monkeypatch):
+    import app.services.images as images_module
+
+    def boom(data):
+        raise ValueError("weird exif")
+
+    monkeypatch.setattr(images_module, "process_image", boom)
+    r = image_service.upload("odd.jpg", png_bytes(), tags=[])
+    assert r.status == "error" and r.message == "Could not read image"
+
+
+def test_find_by_metadata_prefers_photos_matching_more_terms(image_service):
+    for i in range(3):
+        image_service.upload(f"b{i}.png", png_bytes(color=(i, 0, 0)), tags=["beach"])
+    both = image_service.upload("goa.png", png_bytes(color=(9, 9, 9)), tags=["beach", "goa"]).id
+    found = image_service.find_by_metadata(["goa", "beach"], tags=[], source=None, limit=1)
+    assert [i.id for i in found] == [both]
+
+
+def test_find_by_metadata_matches_word_starts_not_substrings(image_service):
+    image_service.upload("p.png", png_bytes(color=(1, 1, 1)), tags=["party"], title="Start of summer")
+    hit = image_service.upload("a.png", png_bytes(color=(2, 2, 2)), tags=["street-art"]).id
+    assert [i.id for i in image_service.find_by_metadata(["art"], tags=[], source=None, limit=10)] == [hit]

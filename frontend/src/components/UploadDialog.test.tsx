@@ -47,4 +47,13 @@ describe("UploadDialog", () => {
     renderWithClient(<UploadDialog open onClose={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Upload 0 files" })).toBeDisabled();
   });
+
+  it("includes tag text the user typed but did not confirm with Enter", async () => {
+    vi.mocked(api.uploadImage).mockResolvedValue({ filename: "a.png", status: "created", id: "1", message: null });
+    renderWithClient(<UploadDialog open onClose={vi.fn()} />);
+    await userEvent.upload(screen.getByLabelText("Choose files"), [file("a.png")]);
+    await userEvent.type(screen.getByLabelText("Tags for upload"), "goa-trip");
+    await userEvent.click(screen.getByRole("button", { name: "Upload 1 file" }));
+    expect(vi.mocked(api.uploadImage).mock.calls[0][1].tags).toEqual(["goa-trip"]);
+  });
 });
