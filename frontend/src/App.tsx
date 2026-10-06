@@ -7,12 +7,13 @@ import { DetailDrawer } from "./components/DetailDrawer";
 import { Gallery } from "./components/Gallery";
 import { HealthBanner } from "./components/HealthBanner";
 import { SearchBar } from "./components/SearchBar";
+import { UploadDialog } from "./components/UploadDialog";
 import { useSearchState } from "./hooks/useSearchState";
 
 export default function App() {
   const [search, setSearch] = useSearchState();
   const [openId, setOpenId] = useState<string | null>(null);
-  const [, setUploadOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [demoChoice, setDemoChoice] = useState<boolean | null>(null);
 
   const tags = useQuery({ queryKey: ["tags"], queryFn: api.listTags });
@@ -48,6 +49,7 @@ export default function App() {
         <Gallery q={search.q} tags={search.tags} source={source} onOpen={setOpenId} onUpload={() => setUploadOpen(true)} />
       </main>
       <DetailDrawer imageId={openId} onClose={() => setOpenId(null)} />
+      <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} />
       <Toaster position="bottom-right" richColors />
     </div>
   );
