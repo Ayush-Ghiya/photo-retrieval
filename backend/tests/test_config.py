@@ -37,3 +37,11 @@ def test_weight_must_be_between_0_and_1(monkeypatch):
     monkeypatch.setenv("SEARCH_IMG_WEIGHT", "1.5")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_empty_s3_endpoint_means_real_aws(monkeypatch):
+    monkeypatch.setenv("S3_ENDPOINT_URL", "")
+    monkeypatch.setenv("S3_PUBLIC_ENDPOINT_URL", "")
+    s = Settings(_env_file=None)
+    assert s.s3_endpoint_url is None
+    assert s.s3_public_endpoint is None
