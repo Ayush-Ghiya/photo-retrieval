@@ -61,3 +61,13 @@ from tests.fakes import FakeEncoder
 @pytest.fixture
 def encoder() -> FakeEncoder:
     return FakeEncoder()
+
+
+from app.services.vector_index import VectorIndex
+
+
+@pytest.fixture
+def index(settings, encoder) -> VectorIndex:
+    idx = VectorIndex(settings.chroma_host, settings.chroma_port, settings.chroma_collection, encoder.model_name)
+    idx.recreate()
+    return idx
