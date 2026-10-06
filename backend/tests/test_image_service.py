@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 
 from app.errors import NotFoundError
 from app.models import Image
-from app.services.images import INDEX_WARNING, ImageService, build_text_document
+from app.services.images import INDEX_WARNING, ImageService
 from app.services.storage import Storage
 from tests.fakes import BrokenIndex
 from tests.helpers import jpeg_with_exif, png_bytes
@@ -14,13 +14,6 @@ from tests.helpers import jpeg_with_exif, png_bytes
 
 def objects(storage, kind):
     return [o["Key"] for o in storage.client.list_objects_v2(Bucket=storage.bucket(kind)).get("Contents", [])]
-
-
-def test_build_text_document():
-    assert build_text_document(None, None, []) is None
-    assert build_text_document(" ", "", []) is None
-    assert build_text_document("Sunset", None, ["goa"]) == "Sunset. tags: goa"
-    assert build_text_document("A", "B", ["x", "y"]) == "A. B. tags: x, y"
 
 
 def test_upload_creates_row_objects_and_vectors(image_service, storage, index, sessions):
@@ -33,11 +26,6 @@ def test_upload_creates_row_objects_and_vectors(image_service, storage, index, s
         assert (img.filename, img.mime_type, img.source) == ("red.png", "image/png", "upload")
     assert objects(storage, "originals") == [f"originals/{r.id}.png"]
     assert objects(storage, "thumbs") == [f"thumbs/{r.id}.webp"]
-    assert sorted(index.ids()) == sorted([f"{r.id}:img", f"{r.id}:txt"])
-
-
-def test_upload_without_metadata_has_only_image_vector(image_service, index):
-    r = image_service.upload("red.png", png_bytes(), tags=[])
     assert index.ids() == [f"{r.id}:img"]
 
 
@@ -89,14 +77,13 @@ def test_upload_when_index_down_keeps_row_unindexed(sessions, storage, encoder, 
     assert svc.unindexed_ids() == [r.id]
 
 
-def test_update_tags_and_title_reembeds_text(image_service, index):
+def test_update_tags_and_title_refreshes_index_filters(image_service, index):
     r = image_service.upload("red.png", png_bytes(), tags=[])
-    assert index.ids() == [f"{r.id}:img"]
     img, warning = image_service.update(r.id, {"title": "  Sunset ", "tags": ["goa", "beach"]})
     assert warning is None
     assert img.title == "Sunset"
     assert [t.name for t in img.tags] == ["beach", "goa"]
-    assert sorted(index.ids()) == sorted([f"{r.id}:img", f"{r.id}:txt"])
+    assert index.ids() == [f"{r.id}:img"]
     assert {h.image_id for h in index.query([1.0] + [0.0] * 7, n=10, tags=["beach"])} == {r.id}
 
 
@@ -106,7 +93,7 @@ def test_update_only_provided_fields(image_service):
     assert (img.title, img.description, [t.name for t in img.tags]) == ("T", None, ["goa"])
 
 
-def test_update_clearing_metadata_removes_text_vector(image_service, index):
+def test_update_clearing_tags_removes_filter_match(image_service, index):
     r = image_service.upload("red.png", png_bytes(), tags=["goa"], title="T")
     image_service.update(r.id, {"title": "", "tags": []})
     assert index.ids() == [f"{r.id}:img"]

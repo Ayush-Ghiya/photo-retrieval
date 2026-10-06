@@ -13,7 +13,7 @@ def test_reindex_catches_up_unindexed(services, sessions, storage, encoder, sett
 
     assert cmd_reindex(services, all_images=False) == 0
     assert services.images.get(r.id).indexed is True
-    assert sorted(index.ids()) == sorted([f"{r.id}:img", f"{r.id}:txt"])
+    assert index.ids() == [f"{r.id}:img"]
 
 
 def test_reindex_all_rebuilds_from_s3(services, index):

@@ -284,3 +284,23 @@ Single page, no router needed beyond query-string state (`?q=&tags=`).
 - Frontend app, tests, `Dockerfile` + `nginx.conf`
 - `.env.example`, updated `.gitignore`, `README.md` (setup, run, seed, test, deploy)
 - Old top-level scripts removed after their logic is ported
+
+## 10. Amendment (2026-10-06, during implementation): metadata matched by keywords
+
+**Finding.** Manual verification (Task 14) showed a photo tagged `goa-trip` and titled
+"Sunset drive" did not appear in the top 40 for "goa trip". CLIP's *text-to-text* cosine is high
+and nearly uniform for short phrases ("goa trip" vs "tags: ship" = 0.82, vs
+"Sunset drive. tags: goa-trip, truck" = 0.74), so the `:txt` vector carried no usable signal and
+every demo image's class-tag vector drowned real metadata matches.
+
+**Change.** Chroma stores only the `:img` vector per photo (with tag/source metadata for filters).
+User metadata is matched by keywords instead:
+
+- Query terms: lowercase alphanumeric words, stopwords removed, simple plural folding.
+- Photo terms: words of title, description and tags (`goa-trip` → `goa`, `trip`).
+- `txt = coverage` = fraction of query terms found in the photo's terms (0..1).
+- Candidates = CLIP top `limit × 3` ∪ up to 500 photos whose metadata contains a query term
+  (same tag/source filters). Missing visual similarities are fetched from Chroma.
+- `score = w · img_sim + (1 − w) · txt` for every candidate (`w = SEARCH_IMG_WEIGHT`, default 0.7).
+
+Tag filter chips, the API and the UI are unchanged.

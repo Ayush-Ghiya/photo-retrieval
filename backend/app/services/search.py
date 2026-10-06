@@ -4,28 +4,21 @@ from app.config import Settings
 from app.models import Image
 from app.services.clip_model import Encoder
 from app.services.images import ImageService
-from app.services.vector_index import Hit, VectorIndex
+from app.services.text_match import coverage, metadata_terms, query_terms
+from app.services.vector_index import VectorIndex
+
+# Upper bound on photos pulled in by a metadata keyword match (on top of CLIP's nearest neighbours).
+METADATA_CANDIDATES = 500
 
 
-def blend(hits: list[Hit], img_sims: dict[UUID, float], img_weight: float) -> list[tuple[UUID, float]]:
-    """Combine per-image 'img' and 'txt' similarities into one score, best first."""
-    img: dict[UUID, float] = {}
-    txt: dict[UUID, float] = {}
-    for h in hits:
-        bucket = img if h.kind == "img" else txt
-        bucket[h.image_id] = max(bucket.get(h.image_id, 0.0), h.similarity)
-
-    scored = []
-    for image_id in img.keys() | txt.keys():
-        i = img.get(image_id, img_sims.get(image_id))
-        t = txt.get(image_id)
-        if t is None:
-            score = i
-        elif i is None:
-            score = (1 - img_weight) * t
-        else:
-            score = img_weight * i + (1 - img_weight) * t
-        scored.append((image_id, score))
+def blend(
+    img_sims: dict[UUID, float], txt_scores: dict[UUID, float], img_weight: float
+) -> list[tuple[UUID, float]]:
+    """score = w * visual similarity + (1 - w) * metadata keyword coverage, best first."""
+    scored = [
+        (image_id, img_weight * img_sims.get(image_id, 0.0) + (1 - img_weight) * txt_scores.get(image_id, 0.0))
+        for image_id in img_sims.keys() | txt_scores.keys()
+    ]
     scored.sort(key=lambda pair: (-pair[1], str(pair[0])))
     return scored
 
@@ -41,10 +34,18 @@ class SearchService:
         self, q: str, *, tags: list[str], source: str | None, limit: int
     ) -> list[tuple[Image, float]]:
         vector = self.encoder.encode_text([q])[0]
-        hits = self.index.query(vector, n=limit * 3, tags=tags, source=source)
-        with_img = {h.image_id for h in hits if h.kind == "img"}
-        txt_only = {h.image_id for h in hits if h.kind == "txt"} - with_img
-        img_sims = self.index.image_similarities(txt_only, vector)
-        ranked = blend(hits, img_sims, self.settings.search_img_weight)
+        img_sims = {h.image_id: h.similarity for h in self.index.query(vector, n=limit * 3, tags=tags, source=source)}
+
+        terms = query_terms(q)
+        matched = self.images.find_by_metadata(terms, tags=tags, source=source, limit=METADATA_CANDIDATES)
+        txt_scores = {}
+        for image in matched:
+            score = coverage(terms, metadata_terms(image.title, image.description, [t.name for t in image.tags]))
+            if score > 0:
+                txt_scores[image.id] = score
+        missing = set(txt_scores) - set(img_sims)
+        img_sims.update(self.index.image_similarities(missing, vector))
+
+        ranked = blend(img_sims, txt_scores, self.settings.search_img_weight)
         rows = self.images.get_many([image_id for image_id, _ in ranked])
         return [(rows[i], score) for i, score in ranked if i in rows][:limit]

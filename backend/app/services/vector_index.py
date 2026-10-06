@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Literal
 from uuid import UUID
 
 import chromadb
@@ -8,7 +7,6 @@ import chromadb
 @dataclass(frozen=True)
 class Hit:
     image_id: UUID
-    kind: Literal["img", "txt"]
     similarity: float
 
 
@@ -27,12 +25,12 @@ def build_where(tags: list[str], source: str | None) -> dict | None:
     return {"$and": conditions}
 
 
-def _ids(image_id: UUID) -> list[str]:
-    return [f"{image_id}:img", f"{image_id}:txt"]
+def _id(image_id: UUID) -> str:
+    return f"{image_id}:img"
 
 
 class VectorIndex:
-    """Derived CLIP index: per image an ':img' vector and optional ':txt' metadata vector."""
+    """Derived CLIP index: one ':img' vector per image, with tag/source metadata for filtering."""
 
     def __init__(self, host: str, port: int, collection_name: str, model_name: str):
         self._host, self._port = host, port
@@ -84,28 +82,22 @@ class VectorIndex:
         image_id: UUID,
         *,
         image_vector: list[float],
-        text_vector: list[float] | None,
         tags: list[str],
         source: str,
     ) -> None:
-        # Delete + add (rather than update) so removed tags / text never linger.
+        # Delete + add (rather than update) so removed tags never linger in the metadata.
         self.delete(image_id)
-        base = {"image_id": str(image_id), "source": source, **{f"tag_{t}": True for t in tags}}
-        ids, embeddings, metadatas = [f"{image_id}:img"], [image_vector], [{**base, "kind": "img"}]
-        if text_vector is not None:
-            ids.append(f"{image_id}:txt")
-            embeddings.append(text_vector)
-            metadatas.append({**base, "kind": "txt"})
-        self.collection.add(ids=ids, embeddings=embeddings, metadatas=metadatas)
+        metadata = {"image_id": str(image_id), "source": source, **{f"tag_{t}": True for t in tags}}
+        self.collection.add(ids=[_id(image_id)], embeddings=[image_vector], metadatas=[metadata])
 
     def get_image_vector(self, image_id: UUID) -> list[float] | None:
-        res = self.collection.get(ids=[f"{image_id}:img"], include=["embeddings"])
+        res = self.collection.get(ids=[_id(image_id)], include=["embeddings"])
         if not res["ids"]:
             return None
         return [float(x) for x in res["embeddings"][0]]
 
     def delete(self, image_id: UUID) -> None:
-        self.collection.delete(ids=_ids(image_id))
+        self.collection.delete(ids=[_id(image_id)])
 
     def query(
         self, vector: list[float], n: int, tags: list[str] = (), source: str | None = None
@@ -120,7 +112,7 @@ class VectorIndex:
             include=["metadatas", "distances"],
         )
         return [
-            Hit(UUID(meta["image_id"]), meta["kind"], 1.0 - dist / 2.0)
+            Hit(UUID(meta["image_id"]), 1.0 - dist / 2.0)
             for meta, dist in zip(res["metadatas"][0], res["distances"][0])
         ]
 
@@ -128,7 +120,7 @@ class VectorIndex:
         if not image_ids:
             return {}
         res = self.collection.get(
-            ids=[f"{i}:img" for i in image_ids], include=["embeddings", "metadatas"]
+            ids=[_id(i) for i in image_ids], include=["embeddings", "metadatas"]
         )
         sims = {}
         for meta, emb in zip(res["metadatas"], res["embeddings"]):

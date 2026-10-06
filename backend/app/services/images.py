@@ -4,7 +4,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from PIL import Image as PILImage
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -37,13 +37,6 @@ def _clean(value: str | None) -> str | None:
         return None
     value = value.strip()
     return value or None
-
-
-def build_text_document(title: str | None, description: str | None, tags: list[str]) -> str | None:
-    parts = [p for p in (_clean(title), _clean(description)) if p]
-    if tags:
-        parts.append("tags: " + ", ".join(tags))
-    return ". ".join(parts) or None
 
 
 class ImageService:
@@ -119,7 +112,7 @@ class ImageService:
     # ---- indexing -----------------------------------------------------------
 
     def index_image(self, image_id: UUID, rgb: PILImage.Image | None = None) -> str | None:
-        """(Re)write this image's vectors. Returns a warning string if indexing failed."""
+        """(Re)write this image's vector and filter metadata. Returns a warning string on failure."""
         image = self.get(image_id)
         tags = [t.name for t in image.tags]
         try:
@@ -130,11 +123,7 @@ class ImageService:
                 if image_vector is None:
                     original = open_rgb(self.storage.get("originals", image.s3_key))
                     image_vector = self.encoder.encode_images([original])[0]
-            doc = build_text_document(image.title, image.description, tags)
-            text_vector = self.encoder.encode_text([doc])[0] if doc else None
-            self.index.upsert(
-                image_id, image_vector=image_vector, text_vector=text_vector, tags=tags, source=image.source
-            )
+            self.index.upsert(image_id, image_vector=image_vector, tags=tags, source=image.source)
             indexed, warning = True, None
         except Exception:
             logger.exception("Indexing failed for %s", image_id)
@@ -165,14 +154,36 @@ class ImageService:
         with self.sessions() as s:
             return {i.id: i for i in s.scalars(select(Image).where(Image.id.in_(ids)))}
 
-    def list_images(
-        self, *, page: int, page_size: int, tags: list[str], source: str | None, sort: str
-    ) -> tuple[list[Image], int]:
-        stmt = select(Image)
+    @staticmethod
+    def _filtered(stmt: Select, tags: list[str], source: str | None) -> Select:
         for tag in tags:
             stmt = stmt.where(Image.tags.any(Tag.name == tag))
         if source:
             stmt = stmt.where(Image.source == source)
+        return stmt
+
+    def find_by_metadata(
+        self, terms: list[str], *, tags: list[str], source: str | None, limit: int
+    ) -> list[Image]:
+        """Images whose title, description or tags contain any of the (alphanumeric) terms."""
+        if not terms:
+            return []
+        conditions = []
+        for term in terms:
+            pattern = f"%{term}%"
+            conditions += [
+                Image.title.ilike(pattern),
+                Image.description.ilike(pattern),
+                Image.tags.any(Tag.name.ilike(pattern)),
+            ]
+        stmt = self._filtered(select(Image), tags, source).where(or_(*conditions)).limit(limit)
+        with self.sessions() as s:
+            return list(s.scalars(stmt))
+
+    def list_images(
+        self, *, page: int, page_size: int, tags: list[str], source: str | None, sort: str
+    ) -> tuple[list[Image], int]:
+        stmt = self._filtered(select(Image), tags, source)
         if sort == "uploaded":
             order = Image.created_at.desc()
         else:
