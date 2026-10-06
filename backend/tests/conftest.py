@@ -35,3 +35,21 @@ def sessions(_session_factory):
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     return _session_factory
+
+
+from app.services.storage import Storage
+
+
+def _empty_bucket(storage: Storage, kind: str) -> None:
+    bucket = storage.bucket(kind)
+    for obj in storage.client.list_objects_v2(Bucket=bucket).get("Contents", []):
+        storage.client.delete_object(Bucket=bucket, Key=obj["Key"])
+
+
+@pytest.fixture
+def storage(settings) -> Storage:
+    s = Storage(settings)
+    s.ensure_buckets()
+    _empty_bucket(s, "originals")
+    _empty_bucket(s, "thumbs")
+    return s
