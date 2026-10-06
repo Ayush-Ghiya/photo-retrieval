@@ -1,0 +1,15 @@
+# torch / torchvision are installed separately (GPU build locally, CPU build in Dockerfile)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+sqlalchemy>=2.0.30
+psycopg[binary]>=3.2
+alembic>=1.13
+pydantic>=2.8
+pydantic-settings>=2.4
+boto3>=1.35
+chromadb-client==1.5.6
+open_clip_torch>=2.26
+pillow>=11
+pillow-heif>=0.18
+numpy>=2

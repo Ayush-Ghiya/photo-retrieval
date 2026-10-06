@@ -3,3 +3,9 @@ cifar_images/
 clip_results/
 __pycache__/
 .env
+node_modules/
+frontend/dist/
+.pytest_cache/
+test-results/
+playwright-report/
+*.egg-info/
