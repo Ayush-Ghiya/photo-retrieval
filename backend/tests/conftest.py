@@ -79,3 +79,11 @@ from app.services.images import ImageService
 @pytest.fixture
 def image_service(sessions, storage, index, encoder, settings) -> ImageService:
     return ImageService(sessions, storage, index, encoder, settings)
+
+
+from app.services.search import SearchService
+
+
+@pytest.fixture
+def search_service(image_service, index, encoder, settings) -> SearchService:
+    return SearchService(image_service, index, encoder, settings)
