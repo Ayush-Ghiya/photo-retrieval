@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Toaster } from "sonner";
 import { api } from "./api/client";
 import type { Source } from "./api/types";
+import { DetailDrawer } from "./components/DetailDrawer";
 import { Gallery } from "./components/Gallery";
 import { HealthBanner } from "./components/HealthBanner";
 import { SearchBar } from "./components/SearchBar";
@@ -10,7 +11,7 @@ import { useSearchState } from "./hooks/useSearchState";
 
 export default function App() {
   const [search, setSearch] = useSearchState();
-  const [, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [, setUploadOpen] = useState(false);
   const [demoChoice, setDemoChoice] = useState<boolean | null>(null);
 
@@ -46,6 +47,7 @@ export default function App() {
       <main className="mx-auto max-w-7xl px-4 py-6">
         <Gallery q={search.q} tags={search.tags} source={source} onOpen={setOpenId} onUpload={() => setUploadOpen(true)} />
       </main>
+      <DetailDrawer imageId={openId} onClose={() => setOpenId(null)} />
       <Toaster position="bottom-right" richColors />
     </div>
   );
