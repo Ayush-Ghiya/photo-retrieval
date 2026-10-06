@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     max_upload_mb: int = 25
     max_batch_files: int = 50
     cors_origins: str = "http://localhost:5173"
+
+    @field_validator("s3_endpoint_url", "s3_public_endpoint_url")
+    @classmethod
+    def _blank_is_none(cls, value: str | None) -> str | None:
+        # `S3_ENDPOINT_URL=` in an env file means "use real AWS", not an empty endpoint.
+        return value or None
 
     @property
     def cors_origin_list(self) -> list[str]:
