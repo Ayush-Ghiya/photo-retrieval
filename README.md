@@ -61,6 +61,9 @@ metadata), `MAX_UPLOAD_MB`, `CLIP_MODEL`.
 
 ## Deploying
 
+> **There is no authentication.** Anyone who can reach the API can upload, edit and delete photos.
+> Keep it on a private network (or behind an authenticating proxy) until auth is added.
+
 1. Build images: `docker build -t photo-api backend` and `docker build -t photo-web frontend`.
 2. Provision S3 (two buckets), Postgres (e.g. RDS) and a ChromaDB server.
 3. Run `photo-api` with env vars from `.env.example`, **unset** `S3_ENDPOINT_URL`, real AWS
