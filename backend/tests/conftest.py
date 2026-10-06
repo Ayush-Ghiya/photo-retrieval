@@ -53,3 +53,11 @@ def storage(settings) -> Storage:
     _empty_bucket(s, "originals")
     _empty_bucket(s, "thumbs")
     return s
+
+
+from tests.fakes import FakeEncoder
+
+
+@pytest.fixture
+def encoder() -> FakeEncoder:
+    return FakeEncoder()
