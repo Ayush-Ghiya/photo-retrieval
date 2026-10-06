@@ -87,3 +87,20 @@ from app.services.search import SearchService
 @pytest.fixture
 def search_service(image_service, index, encoder, settings) -> SearchService:
     return SearchService(image_service, index, encoder, settings)
+
+
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+from app.services.container import Services
+
+
+@pytest.fixture
+def services(settings, sessions, storage, index, encoder, image_service, search_service) -> Services:
+    return Services(settings, sessions, storage, index, encoder, image_service, search_service)
+
+
+@pytest.fixture
+def client(services):
+    with TestClient(create_app(lambda: services)) as c:
+        yield c
