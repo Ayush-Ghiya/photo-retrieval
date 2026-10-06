@@ -71,3 +71,11 @@ def index(settings, encoder) -> VectorIndex:
     idx = VectorIndex(settings.chroma_host, settings.chroma_port, settings.chroma_collection, encoder.model_name)
     idx.recreate()
     return idx
+
+
+from app.services.images import ImageService
+
+
+@pytest.fixture
+def image_service(sessions, storage, index, encoder, settings) -> ImageService:
+    return ImageService(sessions, storage, index, encoder, settings)
