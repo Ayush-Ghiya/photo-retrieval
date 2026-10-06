@@ -72,3 +72,13 @@ def test_model_mismatch(settings, index):
     other = VectorIndex(settings.chroma_host, settings.chroma_port, settings.chroma_collection, "ViT-L/14")
     with pytest.raises(ModelMismatchError):
         other.ensure_collection()
+
+
+def test_recovers_when_collection_is_recreated_by_another_process(settings, index):
+    a = uuid.uuid4()
+    index.upsert(a, image_vector=E[0], tags=[], source="upload")
+    other = VectorIndex(settings.chroma_host, settings.chroma_port, settings.chroma_collection, "fake")
+    other.recreate()  # e.g. `python -m app.cli reindex --all` while the API is running
+    assert index.query(E[0], n=5) == []
+    index.upsert(a, image_vector=E[0], tags=[], source="upload")
+    assert index.ids() == [f"{a}:img"]

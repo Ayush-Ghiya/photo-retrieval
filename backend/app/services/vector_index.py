@@ -1,7 +1,9 @@
+import functools
 from dataclasses import dataclass
 from uuid import UUID
 
 import chromadb
+from chromadb.errors import NotFoundError
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,21 @@ def build_where(tags: list[str], source: str | None) -> dict | None:
     if len(conditions) == 1:
         return conditions[0]
     return {"$and": conditions}
+
+
+def _refreshing(method):
+    """Retry once with a fresh collection handle if the collection was recreated elsewhere
+    (e.g. `python -m app.cli reindex --all` while the API is running)."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except NotFoundError:
+            self._col = None
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 def _id(image_id: UUID) -> str:
@@ -74,9 +91,11 @@ class VectorIndex:
     def ping(self) -> None:
         self.client.heartbeat()
 
+    @_refreshing
     def ids(self) -> list[str]:
         return list(self.collection.get(include=[])["ids"])
 
+    @_refreshing
     def upsert(
         self,
         image_id: UUID,
@@ -90,15 +109,18 @@ class VectorIndex:
         metadata = {"image_id": str(image_id), "source": source, **{f"tag_{t}": True for t in tags}}
         self.collection.add(ids=[_id(image_id)], embeddings=[image_vector], metadatas=[metadata])
 
+    @_refreshing
     def get_image_vector(self, image_id: UUID) -> list[float] | None:
         res = self.collection.get(ids=[_id(image_id)], include=["embeddings"])
         if not res["ids"]:
             return None
         return [float(x) for x in res["embeddings"][0]]
 
+    @_refreshing
     def delete(self, image_id: UUID) -> None:
         self.collection.delete(ids=[_id(image_id)])
 
+    @_refreshing
     def query(
         self, vector: list[float], n: int, tags: list[str] = (), source: str | None = None
     ) -> list[Hit]:
@@ -116,6 +138,7 @@ class VectorIndex:
             for meta, dist in zip(res["metadatas"][0], res["distances"][0])
         ]
 
+    @_refreshing
     def image_similarities(self, image_ids: set[UUID], vector: list[float]) -> dict[UUID, float]:
         if not image_ids:
             return {}
